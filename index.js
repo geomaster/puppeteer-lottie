@@ -84,7 +84,8 @@ module.exports = async (opts) => {
 
   let {
     width = undefined,
-    height = undefined
+    height = undefined,
+    framerate = undefined
   } = opts
 
   ow(output, ow.string.nonEmpty, 'output')
@@ -146,11 +147,11 @@ module.exports = async (opts) => {
     throw new Error('Must pass either "animationData" or "path"')
   }
 
-  const fps = ~~lottieData.fr
+  const inFps = ~~lottieData.fr
   const { w = 640, h = 480 } = lottieData
   const aR = w / h
 
-  ow(fps, ow.number.integer.positive, 'animationData.fr')
+  ow(inFps, ow.number.integer.positive, 'animationData.fr')
   ow(w, ow.number.integer.positive, 'animationData.w')
   ow(h, ow.number.integer.positive, 'animationData.h')
 
@@ -260,6 +261,7 @@ ${inject.body || ''}
   await page.waitForSelector('.ready')
   const duration = await page.evaluate(() => duration)
   const numFrames = await page.evaluate(() => numFrames)
+  const outFps = framerate || inFps
 
   const pageFrame = page.mainFrame()
   const rootHandle = await pageFrame.$('#root')
@@ -274,7 +276,7 @@ ${inject.body || ''}
     spinnerB.succeed()
   }
 
-  const numOutputFrames = isMultiFrame ? numFrames : 1
+  const numOutputFrames = isMultiFrame ? Math.round(duration * outFps) : 1
   const framesLabel = pluralize('frame', numOutputFrames)
   const spinnerR = !quiet && ora(`Rendering ${numOutputFrames} ${framesLabel}`).start()
 
@@ -293,7 +295,7 @@ ${inject.body || ''}
 
       if (isApng) {
         ffmpegArgs.push(
-          '-f', 'image2pipe', '-c:v', 'png', '-r', `${fps}`, '-i', '-',
+          '-f', 'image2pipe', '-c:v', 'png', '-r', `${outFps}`, '-i', '-',
           '-plays', '0'
         )
       }
@@ -310,8 +312,8 @@ ${inject.body || ''}
         }
 
         ffmpegArgs.push(
-          '-f', 'lavfi', '-i', `color=c=black:size=${width}x${height}`,
-          '-f', 'image2pipe', '-c:v', 'png', '-r', `${fps}`, '-i', '-',
+          '-f', 'lavfi', '-i', `color=c=black:size=${width}x${height}:r=${outFps}`,
+          '-f', 'image2pipe', '-c:v', 'png', '-r', `${outFps}`, '-i', '-',
           '-filter_complex', `[0:v][1:v]overlay[o];[o]${scale}:flags=bicubic[out]`,
           '-map', '[out]',
           '-c:v', 'libx264',
@@ -320,7 +322,7 @@ ${inject.body || ''}
           '-crf', ffmpegOptions.crf,
           '-movflags', 'faststart',
           '-pix_fmt', 'yuv420p',
-          '-r', fps
+          '-r', outFps
         )
       }
 
@@ -357,20 +359,21 @@ ${inject.body || ''}
     })
   }
 
-  for (let frame = 0; frame < numFrames; ++frame) {
+  for (let frame = 0; frame < numOutputFrames; ++frame) {
     const frameOutputPath = isMultiFrame
       ? sprintf(tempOutput, frame + 1)
       : tempOutput
 
+    const fileFrame = (frame / outFps) * inFps
     // eslint-disable-next-line no-undef
-    await page.evaluate((frame) => animation.goToAndStop(frame, true), frame)
+    await page.evaluate((fileFrame) => animation.goToAndStop(fileFrame, true), fileFrame)
     const screenshot = await rootHandle.screenshot({
       path: (isApng || isMp4) ? undefined : frameOutputPath,
       ...screenshotOpts
     })
-    
-    if(progress) {
-      progress(frame, numFrames)
+
+    if (progress) {
+      progress(frame, numOutputFrames)
     }
 
     // single screenshot
@@ -413,7 +416,7 @@ ${inject.body || ''}
 
     const params = [
       '-o', escapePath(output),
-      '--fps', Math.min(gifskiOptions.fps || fps, 50), // most of viewers do not support gifs with FPS > 50
+      '--fps', Math.min(gifskiOptions.fps || outFps, 50), // most of viewers do not support gifs with FPS > 50
       gifskiOptions.fast && '--fast',
       '--quality', gifskiOptions.quality,
       '--quiet',

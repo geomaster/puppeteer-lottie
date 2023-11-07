@@ -83,6 +83,25 @@ if (!process.env.CI) {
 
     await fs.remove(output)
   })
+
+  test('bodymovin.json => GIF with custom framerate', async (t) => {
+    const output = tempy.file({ extension: 'gif' })
+
+    await renderLottie({
+      path: bodymovin,
+      quiet: true,
+      framerate: 11,
+      output
+    })
+
+    console.log(output)
+    const image = imageSize(output)
+    console.log(image)
+    t.is(image.width, 1820)
+    t.is(image.height, 275)
+
+    await fs.remove(output)
+  })
 }
 
 test('bodymovin.json => mp4', async (t) => {
@@ -104,6 +123,31 @@ test('bodymovin.json => mp4', async (t) => {
   t.is(probe.width, 1820)
   t.is(probe.height, 274)
   t.is(probe.streams[0].profile, 'High')
+
+  await fs.remove(output)
+})
+
+test('bodymovin.json => mp4 with custom framerate', async (t) => {
+  const output = tempy.file({ extension: 'mp4' })
+
+  await renderLottie({
+    path: bodymovin,
+    quiet: true,
+    ffmpegOptions: {
+      crf: 22,
+      profileVideo: 'high',
+      preset: 'fast'
+    },
+    framerate: 59.94,
+    output
+  })
+
+  const probe = await ffmpegProbe(output)
+  // height is scaled up a bit because h264 encoder requires an even height
+  t.is(probe.width, 1820)
+  t.is(probe.height, 274)
+  t.is(probe.streams[0].profile, 'High')
+  t.is(probe.fps, 59.94)
 
   await fs.remove(output)
 })
